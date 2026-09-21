@@ -72,8 +72,6 @@ var Klass = _isAvailable() ? GObject.registerClass({
         let settings = this.get_settings();
         settings.enable_javascript = true;
         settings.enable_webgl = false;
-        settings.enable_plugins = false;
-        settings.enable_java = false;
         settings.auto_load_images = true;
         settings.enable_smooth_scrolling = true;
         settings.enable_media_stream = false;
@@ -444,7 +442,7 @@ var Klass = _isAvailable() ? GObject.registerClass({
             });
             
             subprocess.init(null);
-            let [, stdout] = subprocess.communicate_utf8(null);
+            let [, stdout] = subprocess.communicate_utf8(null, null);
             
             if (subprocess.get_successful()) {
                 let themeName = stdout.trim().replace(/'/g, '').toLowerCase();

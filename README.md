@@ -8,22 +8,44 @@
 
 Similar to macOS [QLMarkdown](https://github.com/sbarex/QLMarkdown), this extension brings Quick Look-style markdown previews to GNOME Linux desktops.
 
+> **This is a maintained fork** of [noboomu/gnome-markdown-ql](https://github.com/noboomu/gnome-markdown-ql).
+> The original project's install script referenced files that didn't match its own repo layout, so a
+> fresh install never actually worked. This fork fixes that, plus three bugs found while getting it
+> running on Ubuntu 24.04: the preview silently crashing on every file (unrelated to this project —
+> Ubuntu 24.04+ restricts unprivileged user namespaces by default, so WebKit's sandbox needs an
+> AppArmor profile; `install.sh` now adds one), Mermaid diagrams never actually rendering (the fence
+> was only wired up for one of eight markdown flavors), and any bare `$` character — a price, a shell
+> variable — pointlessly fetching MathJax over the network.
+
 ## ✨ Features
 
 - 🚀 **8 Markdown Flavors** - GitHub, CommonMark, Pandoc, GitLab, and more
 - 🎨 **Auto Theme Detection** - Seamlessly adapts to GNOME light/dark themes
 - 🔧 **Syntax Highlighting** - Powered by [Pygments](https://pygments.org/) with 40+ styles
-- 📊 **Rich Content** - Tables, task lists, math equations, Mermaid diagrams
-- ⚡ **Instant Preview** - Sub-second rendering with WebKit2GTK
+- 📊 **Rich Content** - Tables, task lists, math equations, [Mermaid](https://mermaid.js.org/) diagrams (all 8 flavors)
+- 📴 **Works Offline** - Mermaid + MathJax are vendored locally, not fetched from a CDN on every preview
+- ⚡ **Instant Preview** - Sub-second rendering with WebKit2GTK; math is only loaded when real LaTeX is detected
 - 🌐 **Standards Compliant** - Full HTML5 + CSS3 + JavaScript support
 
 ## 🚀 Quick Install
 
+One-liner, no clone needed:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/noboomu/gnome-markdown-quicklook/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/smlblr/gnome-markdown-quicklook/main/install.sh | bash
 ```
 
-**That's it!** The installer will handle dependencies, setup, and configuration automatically.
+Or clone first (lets you read `install.sh` before running it, or edit it):
+
+```bash
+git clone https://github.com/smlblr/gnome-markdown-quicklook.git
+cd gnome-markdown-quicklook
+./install.sh
+```
+
+**That's it!** The installer handles dependencies (installs [uv](https://github.com/astral-sh/uv) if
+missing), vendors Mermaid + MathJax locally, adds the AppArmor profile Ubuntu 24.04+ needs, and sets up
+file associations — automatically.
 
 ## 📋 Supported Markdown Flavors
 
@@ -77,18 +99,27 @@ sushi-markdown-converter --help
 
 - **OS**: Linux with GNOME desktop
 - **GNOME Sushi**: File previewer (`sudo apt install gnome-sushi`)
-- **WebKit2GTK**: Web rendering (`sudo apt install libwebkit2gtk-4.1-dev`)
-- **Python**: 3.8+ with pip or [uv](https://github.com/astral-sh/uv)
+- **WebKit2GTK**: Web rendering (`sudo apt install libwebkit2gtk-4.1-0`)
+- **[uv](https://github.com/astral-sh/uv)**: `install.sh` installs it for you if it's missing
 
-### Dependencies Auto-Install
+### Ubuntu 24.04+ (and anything else with `apparmor_restrict_unprivileged_userns=1`)
 
-The installer automatically handles:
-- [Python Markdown](https://python-markdown.github.io/) - Core markdown processing
-- [Pygments](https://pygments.org/) - Syntax highlighting
-- [PyMdown Extensions](https://facelessuser.github.io/pymdown-extensions/) - Enhanced features
-- [CommonMark](https://github.com/readthedocs/commonmark.py) - Spec compliance
-- [markdown-it-py](https://github.com/executablebooks/markdown-it-py) - Modern parser
-- [python-markdown-math](https://github.com/mitya57/python-markdown-math) - Math support
+Check with `cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns` — if it prints `1`, profile-less
+processes that open a user namespace get shoved into a restricted AppArmor profile. WebKit's preview
+sandbox does exactly that, so **without a profile, the preview crashes silently on every markdown
+file** (Space does nothing). `install.sh` detects this and installs `/etc/apparmor.d/gnome-sushi`
+(the same `unconfined { userns, }` pattern Ubuntu itself uses for nautilus/epiphany) — asking for
+`sudo` only for that one step.
+
+### Dependencies
+
+The converter is a single self-contained script (PEP 723 inline metadata) — `uv run --script` resolves
+its Python dependencies on first use, no separate venv or `pip install` step:
+[Python Markdown](https://python-markdown.github.io/), [Pygments](https://pygments.org/),
+[PyMdown Extensions](https://facelessuser.github.io/pymdown-extensions/),
+[CommonMark](https://github.com/readthedocs/commonmark.py),
+[markdown-it-py](https://github.com/executablebooks/markdown-it-py),
+[python-markdown-math](https://github.com/mitya57/python-markdown-math).
 
 ## 🏗️ Architecture
 
@@ -120,9 +151,10 @@ The installer automatically handles:
 
 ## ⚡ Performance
 
-- **Rendering**: < 100ms for typical documents
-- **Memory**: ~10MB per preview
-- **CPU**: Minimal impact, efficient caching
+- **Rendering**: < 200ms for typical documents (converter itself: ~150ms)
+- **No unnecessary network calls**: math detection requires `$$...$$`, `\(...\)`/`\[...\]`, or a
+  same-line matched `$...$` pair — a bare `$` (price, shell variable) no longer triggers MathJax
+- **Memory**: ~10MB per preview; +3MB/+1MB transient while a Mermaid/MathJax-containing page renders
 - **Large Files**: Handles 1MB+ documents smoothly
 
 ## 🔍 Feature Comparison
@@ -145,7 +177,7 @@ The installer automatically handles:
 ### Local Setup
 
 ```bash
-git clone https://github.com/noboomu/gnome-markdown-quicklook.git
+git clone https://github.com/smlblr/gnome-markdown-quicklook.git
 cd gnome-markdown-quicklook
 uv sync  # or pip install -e .
 ```
@@ -170,33 +202,47 @@ uv run python -m gnome_markdown_quicklook.converter tests/sample.md --flavor com
 
 ## 🛠️ Manual Installation
 
-<details>
-<summary>Click to expand manual installation steps</summary>
+`install.sh` does a few things a straight `cp` won't (rewrites the converter's shebang to point at
+your actual `uv` path, adds the AppArmor profile, vendors Mermaid/MathJax) — running it yourself after
+cloning is the supported "manual" path:
 
 ```bash
-# 1. Install system dependencies
-sudo apt install gnome-sushi libwebkit2gtk-4.1-dev python3-pip
+git clone https://github.com/smlblr/gnome-markdown-quicklook.git
+cd gnome-markdown-quicklook
+./install.sh
+```
 
-# 2. Clone repository
-git clone https://github.com/noboomu/gnome-markdown-quicklook.git
+<details>
+<summary>Doing every step by hand instead</summary>
+
+```bash
+# 1. System dependencies
+sudo apt install gnome-sushi libwebkit2gtk-4.1-0
+
+# 2. uv (converter is a self-contained PEP 723 script, no separate venv)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 3. Clone
+git clone https://github.com/smlblr/gnome-markdown-quicklook.git
 cd gnome-markdown-quicklook
 
-# 3. Install Python dependencies
-uv sync  # or pip install -r requirements.txt
-
-# 4. Install converter
-sudo cp src/gnome_markdown_quicklook/converter.py /usr/local/bin/sushi-markdown-converter
-sudo chmod +x /usr/local/bin/sushi-markdown-converter
+# 4. Install converter — replace the shebang's uv path with `command -v uv`,
+#    skip the source file's own shebang + PEP 723 header (see install.sh's
+#    install_files() for the exact awk one-liner), then:
+chmod +x ~/.local/bin/sushi-markdown-converter
 
 # 5. Install Sushi viewer
-sudo cp src/sushi-viewers/markdown.js /usr/share/sushi/viewers/
+cp src/sushi-viewers/markdown.js ~/.local/share/sushi/viewers/
 
-# 6. Update MIME database
-sudo cp mime/markdown.xml /usr/share/mime/packages/
-sudo update-mime-database /usr/share/mime
+# 6. Vendor Mermaid + MathJax locally (skip and it falls back to CDN)
+mkdir -p ~/.local/share/sushi/vendor
+curl -fsSL https://unpkg.com/mermaid@10/dist/mermaid.min.js -o ~/.local/share/sushi/vendor/mermaid.min.js
+curl -fsSL https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js -o ~/.local/share/sushi/vendor/mathjax.min.js
 
-# 7. Restart Sushi
-pkill -f sushi
+# 7. AppArmor profile — only if `cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns` prints 1
+#    (see install.sh's install_apparmor_profile() for the profile text)
+
+# 8. MIME type + restart sushi — see install.sh's setup_mime_types()/finalize_installation()
 ```
 
 </details>
@@ -221,17 +267,22 @@ pkill -f sushi
 ## 🗑️ Uninstall
 
 ```bash
-# Remove files
-sudo rm -f /usr/local/bin/sushi-markdown-converter
-sudo rm -f /usr/share/sushi/viewers/markdown.js
-sudo rm -f /usr/share/mime/packages/markdown.xml
+# User install (default)
+rm -f ~/.local/bin/sushi-markdown-converter
+rm -f ~/.local/share/sushi/viewers/markdown.js
+rm -rf ~/.local/share/sushi/vendor
+rm -f ~/.local/share/mime/packages/markdown.xml
+update-mime-database ~/.local/share/mime
 
-# Update MIME database
-sudo update-mime-database /usr/share/mime
+# AppArmor profile, if install.sh added one (Ubuntu 24.04+)
+sudo apparmor_parser -R /etc/apparmor.d/gnome-sushi
+sudo rm -f /etc/apparmor.d/gnome-sushi
 
 # Restart Sushi
-pkill -f sushi
+pkill -x sushi
 ```
+
+(System-wide install: same paths under `/usr/share/sushi/...` and `/usr/local/bin`, needs `sudo`.)
 
 ## 📄 License
 
@@ -239,19 +290,21 @@ This project is licensed under the [GNU General Public License v2.0](https://www
 
 ## 🙏 Acknowledgments
 
+- **[noboomu/gnome-markdown-ql](https://github.com/noboomu/gnome-markdown-ql)** - Original project this is forked from
 - **[QLMarkdown](https://github.com/sbarex/QLMarkdown)** - Original macOS inspiration by [Sbarex](https://github.com/sbarex)
 - **[GNOME Sushi](https://gitlab.gnome.org/GNOME/sushi)** - File preview framework by GNOME Project
 - **[Python Markdown](https://python-markdown.github.io/)** - Core markdown processing
 - **[PyMdown Extensions](https://facelessuser.github.io/pymdown-extensions/)** - Enhanced markdown features by [facelessuser](https://github.com/facelessuser)
 - **[Pygments](https://pygments.org/)** - Syntax highlighting by [Georg Brandl](https://github.com/birkenfeld)
+- **[Mermaid](https://mermaid.js.org/)** / **[MathJax](https://www.mathjax.org/)** - Diagrams and math rendering, vendored locally
 
 ## 🌟 Contributing
 
-Contributions welcome! Please read our [Contributing Guide](CONTRIBUTING.md) and submit pull requests to our [GitHub repository](https://github.com/noboomu/gnome-markdown-quicklook).
+Issues and pull requests welcome at the [GitHub repository](https://github.com/smlblr/gnome-markdown-quicklook).
 
 ---
 
 **Ready to use!** 🎉
 ```bash
-curl -fsSL https://raw.githubusercontent.com/noboomu/gnome-markdown-quicklook/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/smlblr/gnome-markdown-quicklook/main/install.sh | bash
 ```

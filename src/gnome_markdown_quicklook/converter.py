@@ -1,4 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#     "markdown",
+# ]
+# ///
 """
 Enhanced Markdown to HTML converter for GNOME Sushi extension
 Supports multiple markdown flavors and proper formatting
@@ -11,6 +16,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 import subprocess
 import json
+from html import escape as html_escape
 
 # Core markdown libraries
 import markdown
@@ -52,9 +58,27 @@ except ImportError:
     MARKDOWN_IT_AVAILABLE = False
 
 
+# Mermaid kod bloklarını hiçbir flavor'ın kod-vurgulama mantığına
+# görünmeden çıkarıp sonradan geri koymak için kullanılan işaretçi.
+# Neden: render_gfm gibi akışlar pymdown.extensions.superfences'i hiç
+# yüklemiyor, superfences'i mermaid için ayrıca yüklemek fenced_code ile
+# çakışır (pymdown belgeleri ikisini birlikte kullanmayı yasaklar); bu
+# yüzden mermaid bloğu markdown ayrıştırıcısına hiç gösterilmiyor.
+MERMAID_FENCE_RE = re.compile(r"```mermaid[ \t]*\n(.*?)\n```", re.DOTALL)
+# Not: \x02/\x03 (STX/ETX) kullanmadık — python-markdown'ın kendi
+# htmlStash mekanizması TAM OLARAK bu iki kontrol karakterini iç işaretçi
+# olarak kullanıyor; onları seçince markdown onları kendi işaretçisi sanıp
+# sessizce siliyordu, MERMAID_BLOCK_0 metni yalın kalıp eşleşmiyordu.
+MERMAID_PLACEHOLDER = "MERMAIDBLOCKPLACEHOLDER{0}ENDMERMAIDBLOCK"
+
+# Yerel mermaid.js kopyası — CDN bağımlılığını kaldırır, offline çalışır.
+# install.sh bu dosyayı buraya kopyalar (bkz. proje README).
+MERMAID_VENDOR_PATH = Path.home() / ".local" / "share" / "sushi" / "vendor" / "mermaid.min.js"
+MATHJAX_VENDOR_PATH = Path.home() / ".local" / "share" / "sushi" / "vendor" / "mathjax.min.js"
+
 class MarkdownRenderer:
     """Enhanced markdown renderer supporting multiple flavors."""
-    
+
     FLAVORS = {
         'standard': 'Standard Python Markdown',
         'gfm': 'GitHub Flavored Markdown',
@@ -65,30 +89,30 @@ class MarkdownRenderer:
         'extra': 'Markdown Extra',
         'mmd': 'MultiMarkdown (via pandoc)'
     }
-    
-    def __init__(self, flavor: str = "gfm", theme: str = "auto", 
+
+    def __init__(self, flavor: str = "gfm", theme: str = "auto",
                  enable_math: bool = True, enable_mermaid: bool = True):
         self.flavor = flavor
         self.theme = theme
         self.enable_math = enable_math
         self.enable_mermaid = enable_mermaid
-        
+
         # Validate flavor
         if flavor not in self.FLAVORS:
             print(f"Warning: Unknown flavor '{flavor}', using 'gfm'", file=sys.stderr)
             self.flavor = 'gfm'
-    
+
     def _get_pygments_style(self) -> str:
         """Get appropriate pygments style for theme."""
         theme = self.theme
         if theme == "auto":
             theme = self._detect_system_theme()
-            
+
         if theme == "dark":
             return "github-dark"
         else:
             return "default"
-    
+
     def _detect_system_theme(self) -> str:
         """Detect system theme (light/dark)."""
         try:
@@ -103,37 +127,37 @@ class MarkdownRenderer:
         except:
             pass
         return "light"
-    
+
     def render_commonmark(self, content: str) -> str:
         """Render using CommonMark specification."""
         if not COMMONMARK_AVAILABLE:
             return self.render_standard(content)
-        
+
         parser = commonmark.Parser()
         renderer = commonmark.HtmlRenderer()
         ast = parser.parse(content)
         return renderer.render(ast)
-    
+
     def render_markdown_it(self, content: str) -> str:
         """Render using markdown-it-py with GFM plugin."""
         if not MARKDOWN_IT_AVAILABLE:
             return self.render_standard(content)
-        
+
         md = MarkdownIt().use(gfm_plugin)
         return md.render(content)
-    
+
     def render_pandoc(self, content: str, format_type: str = "gfm") -> str:
         """Render using pandoc (external)."""
         try:
             cmd = [
-                'pandoc', 
+                'pandoc',
                 '-f', format_type,
                 '-t', 'html5',
                 '--standalone',
                 '--highlight-style', 'github' if self._detect_system_theme() == 'light' else 'github-dark',
                 '--mathjax' if self.enable_math else '--no-highlight'
             ]
-            
+
             result = subprocess.run(
                 cmd,
                 input=content,
@@ -141,7 +165,7 @@ class MarkdownRenderer:
                 capture_output=True,
                 timeout=30
             )
-            
+
             if result.returncode == 0:
                 # Extract body content from pandoc's full HTML
                 html = result.stdout
@@ -153,16 +177,16 @@ class MarkdownRenderer:
             else:
                 print(f"Pandoc error: {result.stderr}", file=sys.stderr)
                 return self.render_standard(content)
-                
+
         except (subprocess.TimeoutExpired, FileNotFoundError) as e:
             print(f"Pandoc not available: {e}", file=sys.stderr)
             return self.render_standard(content)
-    
+
     def render_pymdown(self, content: str) -> str:
         """Render using PyMdown Extensions for GitHub-like experience."""
         if not PYMDOWN_AVAILABLE:
             return self.render_gfm(content)
-        
+
         extensions = [
             'pymdown.extensions.superfences',
             'pymdown.extensions.tasklist',
@@ -183,7 +207,7 @@ class MarkdownRenderer:
             'markdown.extensions.abbr',
             'markdown.extensions.toc'
         ]
-        
+
         extension_configs = {
             'pymdown.extensions.highlight': {
                 'css_class': 'highlight',
@@ -206,14 +230,14 @@ class MarkdownRenderer:
                 'anchorlink': True
             }
         }
-        
+
         md = markdown.Markdown(
             extensions=extensions,
             extension_configs=extension_configs
         )
-        
+
         return md.convert(content)
-    
+
     def render_gfm(self, content: str) -> str:
         """Render GitHub Flavored Markdown."""
         extensions = [
@@ -233,33 +257,33 @@ class MarkdownRenderer:
             'markdown.extensions.nl2br',
             'markdown.extensions.sane_lists'
         ]
-        
+
         # Add task list support manually
         if PYMDOWN_AVAILABLE:
             extensions.append('pymdown.extensions.tasklist')
-        
+
         md = markdown.Markdown(extensions=extensions)
         html = md.convert(content)
-        
+
         # Manual task list conversion if pymdown not available
         if not PYMDOWN_AVAILABLE:
             html = self._convert_task_lists(html)
-        
+
         # Convert @mentions and #issues (basic GitHub-like)
         html = self._convert_github_references(html)
-        
+
         return html
-    
+
     def render_gitlab(self, content: str) -> str:
         """Render GitLab Flavored Markdown."""
         # GitLab is similar to GFM with some additions
         html = self.render_gfm(content)
-        
+
         # Add GitLab-specific features
         html = self._convert_gitlab_references(html)
-        
+
         return html
-    
+
     def render_extra(self, content: str) -> str:
         """Render Markdown Extra."""
         extensions = [
@@ -272,10 +296,10 @@ class MarkdownRenderer:
             ),
             TocExtension(anchorlink=True)
         ]
-        
+
         md = markdown.Markdown(extensions=extensions)
         return md.convert(content)
-    
+
     def render_standard(self, content: str) -> str:
         """Render using standard Python Markdown."""
         extensions = [
@@ -290,10 +314,10 @@ class MarkdownRenderer:
             'markdown.extensions.fenced_code',
             'markdown.extensions.footnotes'
         ]
-        
+
         md = markdown.Markdown(extensions=extensions)
         return md.convert(content)
-    
+
     def _convert_task_lists(self, html: str) -> str:
         """Convert task list syntax manually."""
         # Convert [ ] and [x] to checkboxes
@@ -301,15 +325,15 @@ class MarkdownRenderer:
         html = re.sub(r'<li>\[x\]', '<li><input type="checkbox" class="task-list-item-checkbox" checked disabled>', html)
         html = re.sub(r'<li>\[X\]', '<li><input type="checkbox" class="task-list-item-checkbox" checked disabled>', html)
         return html
-    
+
     def _convert_github_references(self, html: str) -> str:
         """Convert GitHub-style references."""
         # Convert @username mentions
         html = re.sub(r'@(\w+)', r'<a href="https://github.com/\1" class="mention">@\1</a>', html)
-        # Convert #123 issue references  
+        # Convert #123 issue references
         html = re.sub(r'#(\d+)', r'<a href="#issue-\1" class="issue-link">#\1</a>', html)
         return html
-    
+
     def _convert_gitlab_references(self, html: str) -> str:
         """Convert GitLab-style references."""
         # Similar to GitHub but with GitLab specifics
@@ -317,13 +341,13 @@ class MarkdownRenderer:
         html = re.sub(r'#(\d+)', r'<a href="#issue-\1" class="issue-link">#\1</a>', html)
         html = re.sub(r'!(\d+)', r'<a href="#mr-\1" class="mr-link">!\1</a>', html)  # Merge requests
         return html
-    
+
     def get_css_styles(self) -> str:
         """Generate CSS styles for the rendered HTML."""
         theme = self.theme
         if theme == "auto":
             theme = self._detect_system_theme()
-        
+
         # Enhanced CSS with better styling
         base_css = """
         <style>
@@ -336,32 +360,32 @@ class MarkdownRenderer:
             font-size: 16px;
             word-wrap: break-word;
         }
-        
+
         h1, h2, h3, h4, h5, h6 {
             margin-top: 24px;
             margin-bottom: 16px;
             font-weight: 600;
             line-height: 1.25;
         }
-        
-        h1 { 
-            font-size: 2em; 
-            border-bottom: 1px solid #eaecef; 
-            padding-bottom: 10px; 
+
+        h1 {
+            font-size: 2em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 10px;
             margin-top: 0;
         }
-        h2 { 
-            font-size: 1.5em; 
-            border-bottom: 1px solid #eaecef; 
-            padding-bottom: 8px; 
+        h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 8px;
         }
         h3 { font-size: 1.25em; }
         h4 { font-size: 1em; }
         h5 { font-size: 0.875em; }
         h6 { font-size: 0.85em; color: #6a737d; }
-        
+
         p { margin-bottom: 16px; }
-        
+
         blockquote {
             padding: 0 1em;
             margin: 0 0 16px 0;
@@ -369,15 +393,15 @@ class MarkdownRenderer:
             background-color: #f6f8fa;
             color: #6a737d;
         }
-        
-        ul, ol { 
-            margin-bottom: 16px; 
-            padding-left: 2em; 
+
+        ul, ol {
+            margin-bottom: 16px;
+            padding-left: 2em;
         }
-        li { 
-            margin-bottom: 4px; 
+        li {
+            margin-bottom: 4px;
         }
-        
+
         /* Task lists */
         .task-list-item {
             list-style-type: none;
@@ -386,7 +410,7 @@ class MarkdownRenderer:
             margin: 0 6px 2px -20px;
             vertical-align: middle;
         }
-        
+
         code {
             padding: 2px 4px;
             font-size: 85%;
@@ -394,7 +418,7 @@ class MarkdownRenderer:
             border-radius: 6px;
             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
         }
-        
+
         pre {
             padding: 16px;
             overflow: auto;
@@ -404,14 +428,14 @@ class MarkdownRenderer:
             margin-bottom: 16px;
             font-size: 85%;
         }
-        
+
         pre code {
             background-color: transparent;
             padding: 0;
             font-size: 100%;
             border-radius: 0;
         }
-        
+
         table {
             border-collapse: collapse;
             width: 100%;
@@ -419,58 +443,58 @@ class MarkdownRenderer:
             display: block;
             overflow: auto;
         }
-        
+
         th, td {
             padding: 6px 13px;
             border: 1px solid #dfe2e5;
             text-align: left;
         }
-        
+
         th {
             font-weight: 600;
             background-color: #f6f8fa;
         }
-        
+
         tr:nth-child(2n) {
             background-color: #f6f8fa;
         }
-        
+
         img {
             max-width: 100%;
             height: auto;
             margin: 10px 0;
             border-radius: 6px;
         }
-        
+
         a {
             color: #0366d6;
             text-decoration: none;
         }
-        
+
         a:hover {
             text-decoration: underline;
         }
-        
+
         .mention {
             font-weight: 600;
             color: #0366d6;
         }
-        
+
         .issue-link, .mr-link {
             font-weight: 600;
         }
-        
+
         hr {
             height: 0.25em;
             margin: 24px 0;
             background-color: #e1e4e8;
             border: 0;
         }
-        
+
         .highlight {
             margin-bottom: 16px;
         }
-        
+
         .toc {
             background-color: #f6f8fa;
             border: 1px solid #d0d7de;
@@ -478,23 +502,23 @@ class MarkdownRenderer:
             padding: 16px;
             margin-bottom: 16px;
         }
-        
+
         .toc ul {
             list-style: none;
             margin: 0;
             padding-left: 16px;
         }
-        
+
         .toc > ul {
             padding-left: 0;
         }
-        
+
         /* Mermaid diagrams */
         .mermaid {
             text-align: center;
             margin: 16px 0;
         }
-        
+
         /* Keyboard keys */
         .keys kbd {
             background-color: #fafbfc;
@@ -510,52 +534,52 @@ class MarkdownRenderer:
             vertical-align: middle;
         }
         """
-        
+
         # Dark theme modifications
         if theme == "dark":
             dark_css = """
-            body { 
-                background-color: #0d1117; 
-                color: #e6edf3; 
+            body {
+                background-color: #0d1117;
+                color: #e6edf3;
             }
-            h1, h2 { 
-                border-bottom-color: #30363d; 
+            h1, h2 {
+                border-bottom-color: #30363d;
             }
-            h6 { 
-                color: #8b949e; 
+            h6 {
+                color: #8b949e;
             }
-            blockquote { 
-                border-left-color: #656c76; 
+            blockquote {
+                border-left-color: #656c76;
                 background-color: #161b22;
                 color: #8b949e;
             }
-            code { 
-                background-color: rgba(240,246,252,0.15); 
+            code {
+                background-color: rgba(240,246,252,0.15);
             }
-            pre { 
-                background-color: #161b22; 
+            pre {
+                background-color: #161b22;
             }
-            th, td { 
-                border-color: #30363d; 
+            th, td {
+                border-color: #30363d;
             }
-            th { 
-                background-color: #21262d; 
+            th {
+                background-color: #21262d;
             }
-            tr:nth-child(2n) { 
-                background-color: #161b22; 
+            tr:nth-child(2n) {
+                background-color: #161b22;
             }
-            a { 
-                color: #58a6ff; 
+            a {
+                color: #58a6ff;
             }
             .mention {
                 color: #58a6ff;
             }
-            hr { 
-                background-color: #30363d; 
+            hr {
+                background-color: #30363d;
             }
-            .toc { 
-                background-color: #161b22; 
-                border-color: #30363d; 
+            .toc {
+                background-color: #161b22;
+                border-color: #30363d;
             }
             .keys kbd {
                 background-color: #21262d;
@@ -566,58 +590,142 @@ class MarkdownRenderer:
             }
             """
             base_css += dark_css
-        
+
+        # Pygments token colours: pymdown/codehilite emit class-based spans
+        # (noclasses=False), so the matching stylesheet must be embedded here,
+        # otherwise code blocks carry classes but no colours.
+        try:
+            from pygments.formatters import HtmlFormatter
+            base_css += "\n" + HtmlFormatter(
+                style=self._get_pygments_style()
+            ).get_style_defs('.highlight')
+        except Exception as e:
+            print(f"Pygments CSS unavailable: {e}", file=sys.stderr)
         base_css += "</style>"
         return base_css
-    
+
+    def _has_real_math(self, content: str) -> bool:
+        """İçerikte gerçekten LaTeX matematiği var mı, yoksa yalın "$" mi.
+
+        $$...$$ ve \\(...\\)/\\[...\\] her zaman kesin kabul edilir. Tek
+        $ ise yalnızca satırda TAM 2 tane $ varsa ve aralarında (içeride)
+        baştan/sondan boşluk yoksa kabul edilir. Neden: eskiden herhangi
+        bir "$" (fiyat: "$10/ay", kabuk değişkeni: "$HOME") MathJax +
+        polyfill.io'yu tetikliyordu; polyfill.io async değil, sayfa
+        görünmeden önce ağdan inmesini bekliyordu. Bu makinedeki projelerin
+        111/440 .md dosyasında (%25) yalın "$" bulundu, hepsi gereksiz ağ
+        çağrısı yapıyordu (linux-problem-fix sorun 03, "hız" bulgusu).
+        """
+        if "$$" in content or "\\(" in content or "\\[" in content:
+            return True
+        for line in content.splitlines():
+            if line.count("$") == 2:
+                i, j = line.find("$"), line.rfind("$")
+                inner = line[i + 1:j]
+                if inner and not inner[0].isspace() and not inner[-1].isspace():
+                    return True
+        return False
+
+    def _extract_mermaid_blocks(self, content: str):
+        """```mermaid bloklarını içerikten çıkarır, yerine işaretçi koyar.
+
+        Amaç: markdown ayrıştırıcısı (hangi flavor olursa olsun) mermaid
+        kodunu hiç görmesin, kod-vurgulama veya escape mantığı karışmasın.
+        """
+        blocks = []
+
+        def _stash(m):
+            blocks.append(m.group(1))
+            return MERMAID_PLACEHOLDER.format(len(blocks) - 1)
+
+        return MERMAID_FENCE_RE.sub(_stash, content), blocks
+
+    def _reinsert_mermaid_blocks(self, html_body: str, blocks) -> str:
+        """İşaretçileri gerçek <div class="mermaid"> bloklarıyla değiştirir.
+
+        Kaynak html_escape ile kaçırılır: mermaid söz dizimi `<|--`, `-->`
+        gibi köşeli parantez içeren oklar kullanır, kaçırılmazsa tarayıcı
+        bunları HTML etiketi sanıp diyagramı bozar. mermaid.js zaten
+        textContent'i (otomatik çözülmüş haliyle) okuyacak şekilde çalışır.
+        """
+        for idx, code in enumerate(blocks):
+            placeholder = MERMAID_PLACEHOLDER.format(idx)
+            div = f'<div class="mermaid">{html_escape(code)}</div>'
+            # Tek başına paragraf olduğunda markdown <p> ile sarar; div
+            # blok elemanı olduğu için <p> içinde geçersiz, önce onu söker.
+            html_body = html_body.replace(f"<p>{placeholder}</p>", div)
+            html_body = html_body.replace(placeholder, div)
+        return html_body
+
     def render_content(self, content: str) -> str:
         """Render markdown content using the specified flavor."""
         try:
+            mermaid_content, mermaid_blocks = self._extract_mermaid_blocks(content)
+
             # Choose renderer based on flavor
             if self.flavor == 'commonmark':
-                html_body = self.render_commonmark(content)
+                html_body = self.render_commonmark(mermaid_content)
             elif self.flavor == 'gfm':
-                html_body = self.render_gfm(content)
+                html_body = self.render_gfm(mermaid_content)
             elif self.flavor == 'pymdown':
-                html_body = self.render_pymdown(content)
+                html_body = self.render_pymdown(mermaid_content)
             elif self.flavor == 'pandoc':
-                html_body = self.render_pandoc(content, 'gfm')
+                html_body = self.render_pandoc(mermaid_content, 'gfm')
             elif self.flavor == 'mmd':
-                html_body = self.render_pandoc(content, 'markdown_mmd')
+                html_body = self.render_pandoc(mermaid_content, 'markdown_mmd')
             elif self.flavor == 'gitlab':
-                html_body = self.render_gitlab(content)
+                html_body = self.render_gitlab(mermaid_content)
             elif self.flavor == 'extra':
-                html_body = self.render_extra(content)
+                html_body = self.render_extra(mermaid_content)
             else:  # standard
-                html_body = self.render_standard(content)
-            
+                html_body = self.render_standard(mermaid_content)
+
+            if mermaid_blocks:
+                html_body = self._reinsert_mermaid_blocks(html_body, mermaid_blocks)
+
             # Get CSS styles
             css = self.get_css_styles()
-            
+
             # Add MathJax if math is enabled and detected
             math_js = ""
-            if self.enable_math and ("$" in content or "\\(" in content or "\\[" in content):
-                math_js = """
-                <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
-                <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+            if self.enable_math and self._has_real_math(content):
+                # polyfill.io kaldırıldı: WebKit2GTK (JavaScriptCore) zaten
+                # ES6+ destekliyor, polyfill'e ihtiyaç yok — ayrıca async
+                # değildi, sayfa görünmeden önce ağdan inmesini bekletiyordu.
+                if MATHJAX_VENDOR_PATH.exists():
+                    mathjax_src = f"<script>{MATHJAX_VENDOR_PATH.read_text()}</script>"
+                else:
+                    mathjax_src = '<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>'
+                math_js = f"""
                 <script>
-                  MathJax = {
-                    tex: {
+                  MathJax = {{
+                    tex: {{
                       inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
                       displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
-                    }
-                  };
+                    }}
+                  }};
                 </script>
+                {mathjax_src}
                 """
-            
+
             # Add Mermaid if diagrams are enabled and detected
             mermaid_js = ""
-            if self.enable_mermaid and ("```mermaid" in content or '<div class="mermaid">' in html_body):
-                mermaid_js = """
-                <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
-                <script>mermaid.initialize({startOnLoad:true, theme: 'neutral'});</script>
+            if self.enable_mermaid and mermaid_blocks:
+                mermaid_theme = 'dark' if self._detect_system_theme() == 'dark' else 'neutral'
+                if MERMAID_VENDOR_PATH.exists():
+                    # Satır içi: offline çalışır, sandbox'lı WebKit sürecinin
+                    # ayrı bir dosya okumasına gerek kalmaz.
+                    mermaid_script = f"<script>{MERMAID_VENDOR_PATH.read_text()}</script>"
+                else:
+                    # Yerel kopya kurulmamışsa (install.sh atlanmış olabilir)
+                    # sessizce özellik kaybetmek yerine CDN'i dener; offline
+                    # önizlemede çalışmaz.
+                    mermaid_script = '<script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>'
+                mermaid_js = f"""
+                {mermaid_script}
+                <script>mermaid.initialize({{startOnLoad:true, theme: '{mermaid_theme}'}});</script>
                 """
-            
+
             # Construct full HTML
             html = f"""<!DOCTYPE html>
 <html>
@@ -633,22 +741,22 @@ class MarkdownRenderer:
     {html_body}
 </body>
 </html>"""
-            
+
             return html
-            
+
         except Exception as e:
             print(f"✗ Render error: {e}", file=sys.stderr)
             return f"<html><body><h1>Error</h1><p>Failed to render markdown: {str(e)}</p></body></html>"
-    
+
     def render_file(self, file_path: Path) -> str:
         """Render a markdown file to HTML."""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
             print(f"✓ Read file: {len(content)} chars", file=sys.stderr)
             return self.render_content(content)
-            
+
         except Exception as e:
             print(f"✗ File error: {e}", file=sys.stderr)
             return f"<html><body><h1>Error</h1><p>Failed to read file: {str(e)}</p></body></html>"
@@ -658,8 +766,8 @@ def main():
     """Command line interface for the markdown converter."""
     parser = argparse.ArgumentParser(description="Convert Markdown to HTML with multiple flavor support")
     parser.add_argument("file", help="Markdown file to convert")
-    parser.add_argument("--flavor", "-f", 
-                       choices=list(MarkdownRenderer.FLAVORS.keys()), 
+    parser.add_argument("--flavor", "-f",
+                       choices=list(MarkdownRenderer.FLAVORS.keys()),
                        default="gfm",
                        help="Markdown flavor to use")
     parser.add_argument("--theme", choices=["light", "dark", "auto"], default="auto",
@@ -667,17 +775,17 @@ def main():
     parser.add_argument("--no-math", action="store_true", help="Disable math rendering")
     parser.add_argument("--no-mermaid", action="store_true", help="Disable mermaid diagrams")
     parser.add_argument("--output", "-o", help="Output HTML file (default: stdout)")
-    parser.add_argument("--list-flavors", action="store_true", 
+    parser.add_argument("--list-flavors", action="store_true",
                        help="List available markdown flavors")
-    
+
     args = parser.parse_args()
-    
+
     if args.list_flavors:
         print("Available markdown flavors:")
         for flavor, description in MarkdownRenderer.FLAVORS.items():
             print(f"  {flavor:12} - {description}")
         return
-    
+
     # Create renderer
     renderer = MarkdownRenderer(
         flavor=args.flavor,
@@ -685,16 +793,16 @@ def main():
         enable_math=not args.no_math,
         enable_mermaid=not args.no_mermaid
     )
-    
+
     # Render file
     file_path = Path(args.file)
     if not file_path.exists():
         print(f"Error: File '{file_path}' not found", file=sys.stderr)
         sys.exit(1)
-    
+
     print(f"✓ Using {args.flavor} flavor", file=sys.stderr)
     html = renderer.render_file(file_path)
-    
+
     # Output result
     if args.output:
         with open(args.output, 'w', encoding='utf-8') as f:
