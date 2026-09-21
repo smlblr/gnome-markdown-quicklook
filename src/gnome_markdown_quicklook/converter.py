@@ -76,6 +76,11 @@ MERMAID_PLACEHOLDER = "MERMAIDBLOCKPLACEHOLDER{0}ENDMERMAIDBLOCK"
 MERMAID_VENDOR_PATH = Path.home() / ".local" / "share" / "sushi" / "vendor" / "mermaid.min.js"
 MATHJAX_VENDOR_PATH = Path.home() / ".local" / "share" / "sushi" / "vendor" / "mathjax.min.js"
 
+# TocExtension'da anchorlink=False: başlık yine `id` alır (TOC/mermaid
+# linkleri, #fragment gezinmesi çalışır) ama METNİ <a> ile sarılmaz. True
+# olduğunda CSS bu linki sıfırlamadığı için başlıklar tarayıcı varsayılan
+# mavi link rengiyle görünüyordu — VS Code'un kendi markdown önizlemesi ve
+# Markdown Preview Enhanced de başlığı hiç linke çevirmiyor, aynı yol.
 class MarkdownRenderer:
     """Enhanced markdown renderer supporting multiple flavors."""
 
@@ -227,7 +232,7 @@ class MarkdownRenderer:
                 'custom_checkbox': True
             },
             'markdown.extensions.toc': {
-                'anchorlink': True
+                'anchorlink': False
             }
         }
 
@@ -248,7 +253,7 @@ class MarkdownRenderer:
                 noclasses=False,
                 pygments_style=self._get_pygments_style()
             ),
-            TocExtension(anchorlink=True),
+            TocExtension(anchorlink=False),
             'markdown.extensions.fenced_code',
             'markdown.extensions.footnotes',
             'markdown.extensions.attr_list',
@@ -294,7 +299,7 @@ class MarkdownRenderer:
                 noclasses=False,
                 pygments_style=self._get_pygments_style()
             ),
-            TocExtension(anchorlink=True)
+            TocExtension(anchorlink=False)
         ]
 
         md = markdown.Markdown(extensions=extensions)
@@ -310,7 +315,7 @@ class MarkdownRenderer:
                 noclasses=False,
                 pygments_style=self._get_pygments_style()
             ),
-            TocExtension(anchorlink=True),
+            TocExtension(anchorlink=False),
             'markdown.extensions.fenced_code',
             'markdown.extensions.footnotes'
         ]
