@@ -17,6 +17,8 @@ from typing import Dict, Any, Optional, Union
 import subprocess
 import json
 from html import escape as html_escape
+from pygments.style import Style as PygmentsStyle
+from pygments.token import Comment, Error, Generic, Keyword, Name, Number, Operator, String
 
 # Core markdown libraries
 import markdown
@@ -81,6 +83,74 @@ MATHJAX_VENDOR_PATH = Path.home() / ".local" / "share" / "sushi" / "vendor" / "m
 # olduğunda CSS bu linki sıfırlamadığı için başlıklar tarayıcı varsayılan
 # mavi link rengiyle görünüyordu — VS Code'un kendi markdown önizlemesi ve
 # Markdown Preview Enhanced de başlığı hiç linke çevirmiyor, aynı yol.
+# md-preview projesinin (~/samilProjects/md-preview) varsayılan syntax
+# renkleriyle birebir aynı olsun diye elle tanımlanmış iki stil — GitHub'ın
+# kendi highlight.js temaları github.min.css / github-dark.min.css'teki
+# .hljs-* renk değerlerinin karşılık gelen Pygments token tipine taşınmış
+# hali (Pygments'in kendi "github-dark" hazır stili farklı bir projeden
+# geliyor, birebir aynı olmayabilir; burada kaynak md-preview'un kendisi).
+class _GitHubLightPygmentsStyle(PygmentsStyle):
+    background_color = "#ffffff"
+    styles = {
+        Comment: "#6a737d",
+        Error: "#d73a49",
+        Keyword: "#d73a49",
+        Name: "#24292e",
+        Name.Builtin: "#e36209",
+        Name.Builtin.Pseudo: "#e36209",
+        Name.Class: "#6f42c1",
+        Name.Constant: "#e36209",
+        Name.Decorator: "#6f42c1",
+        Name.Function: "#6f42c1",
+        Name.Tag: "#22863a",
+        Name.Attribute: "#005cc5",
+        Name.Variable: "#005cc5",
+        String: "#032f62",
+        String.Regex: "#032f62",
+        Number: "#005cc5",
+        Operator: "#005cc5",
+        Operator.Word: "#d73a49",
+        Generic.Deleted: "bg:#ffeef0 #b31d28",
+        Generic.Inserted: "bg:#f0fff4 #22863a",
+        Generic.Emph: "italic #24292e",
+        Generic.Strong: "bold #24292e",
+        Generic.Heading: "bold #24292e",
+        Generic.Subheading: "bold #24292e",
+        Generic.Error: "#d73a49",
+    }
+
+
+class _GitHubDarkPygmentsStyle(PygmentsStyle):
+    background_color = "#0d1117"
+    styles = {
+        Comment: "#8b949e",
+        Error: "#ff7b72",
+        Keyword: "#ff7b72",
+        Name: "#c9d1d9",
+        Name.Builtin: "#ffa657",
+        Name.Builtin.Pseudo: "#ffa657",
+        Name.Class: "#d2a8ff",
+        Name.Constant: "#ffa657",
+        Name.Decorator: "#d2a8ff",
+        Name.Function: "#d2a8ff",
+        Name.Tag: "#7ee787",
+        Name.Attribute: "#79c0ff",
+        Name.Variable: "#79c0ff",
+        String: "#a5d6ff",
+        String.Regex: "#a5d6ff",
+        Number: "#79c0ff",
+        Operator: "#79c0ff",
+        Operator.Word: "#ff7b72",
+        Generic.Deleted: "bg:#67060c #ffdcd7",
+        Generic.Inserted: "bg:#033a16 #aff5b4",
+        Generic.Emph: "italic #c9d1d9",
+        Generic.Strong: "bold #c9d1d9",
+        Generic.Heading: "bold #c9d1d9",
+        Generic.Subheading: "bold #c9d1d9",
+        Generic.Error: "#ff7b72",
+    }
+
+
 class MarkdownRenderer:
     """Enhanced markdown renderer supporting multiple flavors."""
 
@@ -117,6 +187,21 @@ class MarkdownRenderer:
             return "github-dark"
         else:
             return "default"
+
+    def _get_pygments_style_class(self):
+        """get_css_styles()'ta gerçek renkleri üretmek için kullanılan sınıf.
+
+        _get_pygments_style() (yukarıda) hâlâ bir isim (string) döndürüyor;
+        pymdown/codehilite'a extension_configs üzerinden geçiliyor ama
+        noclasses=False olduğu için o değerin görsel bir etkisi yok — kod
+        blokları sınıf adlı <span> üretiyor, renkler SADECE aşağıdaki
+        HtmlFormatter çağrısından gelen CSS'ten geliyor. Asıl renk kararı
+        burada veriliyor.
+        """
+        theme = self.theme
+        if theme == "auto":
+            theme = self._detect_system_theme()
+        return _GitHubDarkPygmentsStyle if theme == "dark" else _GitHubLightPygmentsStyle
 
     def _detect_system_theme(self) -> str:
         """Detect system theme (light/dark)."""
@@ -357,12 +442,13 @@ class MarkdownRenderer:
         base_css = """
         <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
             line-height: 1.6;
             max-width: 800px;
             margin: 0 auto;
             padding: 40px 20px;
             font-size: 16px;
+            color: #1a1a1a;
             word-wrap: break-word;
         }
 
@@ -374,29 +460,30 @@ class MarkdownRenderer:
         }
 
         h1 {
-            font-size: 2em;
-            border-bottom: 1px solid #eaecef;
-            padding-bottom: 10px;
+            font-size: 2.25em;
+            font-weight: 300;
+            border-bottom: 1px solid #e1e4e8;
+            padding-bottom: .3em;
             margin-top: 0;
         }
         h2 {
-            font-size: 1.5em;
-            border-bottom: 1px solid #eaecef;
-            padding-bottom: 8px;
+            font-size: 1.75em;
+            font-weight: 400;
+            border-bottom: 1px solid #e1e4e8;
+            padding-bottom: .2em;
         }
-        h3 { font-size: 1.25em; }
-        h4 { font-size: 1em; }
-        h5 { font-size: 0.875em; }
-        h6 { font-size: 0.85em; color: #6a737d; }
+        h3 { font-size: 1.5em; font-weight: 500; }
+        h4 { font-size: 1.25em; }
+        h5 { font-size: 1.1em; }
+        h6 { font-size: 1em; }
 
         p { margin-bottom: 16px; }
 
         blockquote {
             padding: 0 1em;
             margin: 0 0 16px 0;
-            border-left: 0.25em solid #dfe2e5;
-            background-color: #f6f8fa;
-            color: #6a737d;
+            border-left: 4px solid #ddd;
+            color: #666;
         }
 
         ul, ol {
@@ -417,10 +504,10 @@ class MarkdownRenderer:
         }
 
         code {
-            padding: 2px 4px;
+            padding: 2px 6px;
             font-size: 85%;
-            background-color: rgba(27,31,35,0.05);
-            border-radius: 6px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
         }
 
@@ -429,7 +516,7 @@ class MarkdownRenderer:
             overflow: auto;
             line-height: 1.45;
             background-color: #f6f8fa;
-            border-radius: 6px;
+            border-radius: 8px;
             margin-bottom: 16px;
             font-size: 85%;
         }
@@ -450,8 +537,8 @@ class MarkdownRenderer:
         }
 
         th, td {
-            padding: 6px 13px;
-            border: 1px solid #dfe2e5;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
             text-align: left;
         }
 
@@ -472,7 +559,7 @@ class MarkdownRenderer:
         }
 
         a {
-            color: #0366d6;
+            color: #0969da;
             text-decoration: none;
         }
 
@@ -482,7 +569,7 @@ class MarkdownRenderer:
 
         .mention {
             font-weight: 600;
-            color: #0366d6;
+            color: #0969da;
         }
 
         .issue-link, .mr-link {
@@ -490,10 +577,11 @@ class MarkdownRenderer:
         }
 
         hr {
-            height: 0.25em;
-            margin: 24px 0;
-            background-color: #e1e4e8;
+            height: 1px;
+            margin: 2em 0;
+            background-color: transparent;
             border: 0;
+            border-top: 1px solid #e1e4e8;
         }
 
         .highlight {
@@ -544,54 +632,51 @@ class MarkdownRenderer:
         if theme == "dark":
             dark_css = """
             body {
-                background-color: #0d1117;
-                color: #e6edf3;
+                background-color: #1e1e1e;
+                color: #d4d4d4;
             }
             h1, h2 {
-                border-bottom-color: #30363d;
-            }
-            h6 {
-                color: #8b949e;
+                border-bottom-color: #333;
             }
             blockquote {
-                border-left-color: #656c76;
-                background-color: #161b22;
-                color: #8b949e;
+                border-left-color: #444;
+                color: #aaa;
             }
             code {
-                background-color: rgba(240,246,252,0.15);
+                background-color: #2d2d2d;
             }
             pre {
-                background-color: #161b22;
+                background-color: #0d1117;
             }
             th, td {
-                border-color: #30363d;
+                border-color: #444;
             }
             th {
-                background-color: #21262d;
+                background-color: #2d2d2d;
+                color: #f0f0f0;
             }
             tr:nth-child(2n) {
-                background-color: #161b22;
+                background-color: #252525;
             }
             a {
-                color: #58a6ff;
+                color: #6cb6ff;
             }
             .mention {
-                color: #58a6ff;
+                color: #6cb6ff;
             }
             hr {
-                background-color: #30363d;
+                border-top-color: #333;
             }
             .toc {
-                background-color: #161b22;
-                border-color: #30363d;
+                background-color: #2d2d2d;
+                border-color: #444;
             }
             .keys kbd {
-                background-color: #21262d;
-                border-color: #30363d;
-                border-bottom-color: #6e7681;
-                box-shadow: inset 0 -1px 0 #6e7681;
-                color: #e6edf3;
+                background-color: #2d2d2d;
+                border-color: #444;
+                border-bottom-color: #666;
+                box-shadow: inset 0 -1px 0 #666;
+                color: #d4d4d4;
             }
             """
             base_css += dark_css
@@ -602,7 +687,7 @@ class MarkdownRenderer:
         try:
             from pygments.formatters import HtmlFormatter
             base_css += "\n" + HtmlFormatter(
-                style=self._get_pygments_style()
+                style=self._get_pygments_style_class()
             ).get_style_defs('.highlight')
         except Exception as e:
             print(f"Pygments CSS unavailable: {e}", file=sys.stderr)
