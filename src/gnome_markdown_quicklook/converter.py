@@ -801,7 +801,7 @@ class MarkdownRenderer:
             # Add Mermaid if diagrams are enabled and detected
             mermaid_js = ""
             if self.enable_mermaid and mermaid_blocks:
-                mermaid_theme = 'dark' if self._detect_system_theme() == 'dark' else 'neutral'
+                mermaid_theme = 'dark' if self._detect_system_theme() == 'dark' else 'default'  # md-preview de 'neutral' değil 'default' kullanıyor; neutral gri/soluk kalıyor
                 if MERMAID_VENDOR_PATH.exists():
                     # Satır içi: offline çalışır, sandbox'lı WebKit sürecinin
                     # ayrı bir dosya okumasına gerek kalmaz.
